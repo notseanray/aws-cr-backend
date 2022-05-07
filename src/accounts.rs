@@ -65,34 +65,32 @@ macro_rules! timestamp {
     };
 }
 
-#[derive(Deserialize)]
-// Make clippy shut up
-#[allow(clippy::upper_case_acronyms)]
-pub(crate) enum Team {
-    FTC1002,
-    FTC11347,
-    FRC1002,
-    BEST,
-}
-
-impl Team {
-    pub fn match_team(e: &str) -> Result<Self, ResponseError> {
-        match e {
-            "FTC1002" => Ok(Self::FTC1002),
-            "FTC11347" => Ok(Self::FTC11347),
-            "FRC1002" => Ok(Self::FRC1002),
-            "BEST" => Ok(Self::BEST),
-            _ => Err(ResponseError::InvalidTeam),
-        }
+pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
+    let mut teams = Vec::with_capacity(1);
+    for e in t {
+        teams.push(match e.as_str() {
+            "FTC1002" | "FTC11347" | "FRC1002" | "BEST" => e,
+            _ => return Err(ResponseError::InvalidTeam),
+        });
     }
+    // janky as hell, but verify that someone isn't on both FTC teams
+    if teams.is_empty()
+        || teams.len() > 3
+        || teams.contains(&String::from("FTC1002")) && teams.contains(&String::from("FTC11347"))
+    {
+        return Err(ResponseError::InvalidTeamAssignment);
+    }
+    Ok(teams)
 }
 
 pub(crate) struct NewAccount {
+    pub first_name: String,
+    pub last_name: String,
     pub display_name: String,
     pub username: String,
     pub password: String,
     pub graduation_year: u16,
-    pub team: Team,
+    pub team: Vec<String>,
     pub email: String,
     pub creation_timestamp: u64,
 }
@@ -104,7 +102,7 @@ pub(crate) struct CreateAccountEvent {
     pub creation_code: String,
     pub password: String,
     pub graduation_year: u16,
-    pub team: String,
+    pub team: Vec<String>,
     pub email: String,
 }
 
@@ -118,9 +116,11 @@ impl CreateAccountEvent {
             username: Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?,
             password: Self::validate_password(&a.password)?,
             graduation_year: Self::validate_graduation_year(a.graduation_year)?,
-            team: Team::match_team(&a.team)?,
+            team: match_team(a.team)?,
             email: Self::validate_email(&a.email)?,
             creation_timestamp: timestamp!(),
+            first_name: a.first_name, // these are out of order to prevent extra clones
+            last_name: a.last_name,
         })
     }
 

@@ -6,6 +6,8 @@ pub(crate) enum ResponseError {
     InvalidRequest,
     #[error("Invalid Team Provided")]
     InvalidTeam,
+    #[error("Invalid Team Assignment")]
+    InvalidTeamAssignment,
     #[error("Invalid Username Provided")]
     InvalidUsername,
     #[error("Invalid Password Provided")]

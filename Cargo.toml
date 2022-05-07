@@ -19,6 +19,8 @@ sha3 = "0.10.1"
 regex = "1.5.5"
 lazy_static = "1.4.0"
 chrono = "0.4.19"
+rusoto_core = "0.48.0"
+rusoto_dynamodb = "0.48.0"
 
 [[bin]]
 name = "bootstrap"
