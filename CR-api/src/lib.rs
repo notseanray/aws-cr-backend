@@ -36,11 +36,17 @@ pub(crate) struct LoginEvent {
     pub password: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub(crate) struct Ping {
+    pub ping: u64,
+}
+
 #[derive(Deserialize)]
 pub(crate) enum EventTypes {
     CreateAccount(CreateAccountEvent),
     Payment(PaymentEvent),
     LoginRequest(LoginEvent),
+    PingRequest(Ping),
 }
 
 pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError> {
@@ -54,6 +60,7 @@ pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError>
         R::CreateAccount(v) => handle_create_account(v).await?,
         R::Payment(v) => handle_payment(v).await?,
         R::LoginRequest(v) => handle_login_request(v).await?,
+        R::PingRequest(v) => handle_ping(v).await?,
     }))
 }
 
@@ -63,6 +70,14 @@ pub(crate) async fn handle_create_account(
     CreateAccountEvent::validate_account(e)?;
     Ok(BackendResponse {
         response: BackendResponseContents::ResponseCode(200),
+    })
+}
+
+pub(crate) async fn handle_ping(e: Ping) -> Result<BackendResponse, ResponseError> {
+    Ok(BackendResponse {
+        response: BackendResponseContents::ResponseMessage(
+            serde_json::to_string_pretty(&e).unwrap(),
+        ),
     })
 }
 

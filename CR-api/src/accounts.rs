@@ -21,7 +21,15 @@ macro_rules! env_or_default {
 lazy_static! {
     pub static ref MAX_EMAIL_LENGTH: usize = env_or_default!("MAX_EMAIL_LENGTH", 30);
     pub static ref MAX_PASSWORD_LENGTH: usize = env_or_default!("MAX_PASSWORD_LENGTH", 30);
-    pub static ref MAX_USERNAME_LENGTH: usize = env_or_default!("MAX_USERNAME_LENGTH", 30);
+    pub static ref MIN_PASSWORD_LENGTH: usize = env_or_default!("MIX_PASSWORD_LENGTH", 6);
+    pub static ref MAX_USERNAME_LENGTH: usize = {
+        // We need this to be at least 7 long
+        let length = env_or_default!("MAX_USERNAME_LENGTH", 30);
+        match length {
+            8.. => length,
+            _ => 30
+        }
+    };
     pub static ref CREATION_CODE: String = {
         match env::var("CREATION_CODE").ok() {
             Some(v) => v,
@@ -73,6 +81,7 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
             _ => return Err(ResponseError::InvalidTeam),
         });
     }
+
     // janky as hell, but verify that someone isn't on both FTC teams
     if teams.is_empty()
         || teams.len() > 3
@@ -111,33 +120,60 @@ impl CreateAccountEvent {
         if a.creation_code == *CREATION_CODE {
             return Err(ResponseError::InvalidCreationCode);
         }
+
+        // These are intentionally out of order to prevent extra cloning of strings and to ensure
+        // that things are verified in order
         Ok(NewAccount {
             display_name: Self::validate_display_name(&a.first_name, &a.last_name)?,
-            username: Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?,
             password: Self::validate_password(&a.password)?,
             graduation_year: Self::validate_graduation_year(a.graduation_year)?,
+            username: Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?,
             team: match_team(a.team)?,
             email: Self::validate_email(&a.email)?,
             creation_timestamp: timestamp!(),
-            first_name: a.first_name, // these are out of order to prevent extra clones
+            first_name: a.first_name,
             last_name: a.last_name,
         })
     }
 
+    // Subtract 7 from here since .last_initial-grad_year would always be 7 long
     fn validate_display_name(first: &str, last: &str) -> Result<String, ResponseError> {
-        //if first.len() < 2 || first.len() > 15
+        if first.len() < 2
+            || first.len() > *MAX_USERNAME_LENGTH - 7
+            || last.len() < 2
+            || last.len() > 15
+        {
+            return Err(ResponseError::InvalidName);
+        }
         Ok(format!("{first} {last}"))
     }
 
+    // The first/last name should be valid since we check the display name first, this function
+    // assumes that the last name is not empty
+    //
+    // Username format is first.last_initial-grad_year
     fn generate_username(first: &str, last: &str, grad_year: u16) -> Result<String, ResponseError> {
-        Ok(format!("{first}.{last}-{grad_year}"))
+        let lastname_initial = last.chars().collect::<Vec<char>>()[0];
+
+        Ok(format!("{first}.{lastname_initial}-{grad_year}"))
     }
 
     fn validate_password(password: &str) -> Result<String, ResponseError> {
+        if password.len() > *MAX_PASSWORD_LENGTH || password.len() < *MIN_PASSWORD_LENGTH {
+            return Err(ResponseError::InvalidPassword);
+        }
+
         let mut hasher = Sha3_512::new();
         hasher.update(password.as_bytes());
-        let hash = hasher.finalize();
-        unimplemented!();
+
+        // sha3 512 is 128 characters long
+        let mut hex_string = String::with_capacity(128);
+
+        // convert to hex string since it's easier to deal with
+        for byte in hasher.finalize() {
+            hex_string.push_str(&format!("{:02X}", byte));
+        }
+        Ok(hex_string)
     }
 
     fn validate_graduation_year(year: u16) -> Result<u16, ResponseError> {
