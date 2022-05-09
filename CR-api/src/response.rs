@@ -4,6 +4,10 @@ use thiserror::Error;
 pub(crate) enum ResponseError {
     #[error("Invalid Request")]
     InvalidRequest,
+    #[error("Malformed Request")]
+    MalformedRequest,
+    #[error("Invalid Decryption Result")]
+    InvalidDecryptionResult,
     #[error("Invalid Team Provided")]
     InvalidTeam,
     #[error("Invalid Team Assignment")]

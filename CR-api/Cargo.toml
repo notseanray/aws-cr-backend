@@ -21,6 +21,7 @@ lazy_static = "1.4.0"
 chrono = "0.4.19"
 rusoto_core = "0.48.0"
 rusoto_dynamodb = "0.48.0"
+magic-crypt = { version = "3.1.10", default-features = false }
 
 [[bin]]
 name = "bootstrap"

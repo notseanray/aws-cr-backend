@@ -8,46 +8,39 @@ use std::{
     env,
     time::{SystemTime, UNIX_EPOCH},
 };
+use crate::{env_or_exit, env_or_default};
 
-macro_rules! env_or_default {
-    ($var:expr, $default:expr) => {
-        match env::var($var).ok() {
-            Some(v) => v.parse().unwrap_or($default),
-            None => $default,
-        }
-    };
-}
 
 lazy_static! {
+    /// Key used to sign up an admin account
+    pub static ref ADMIN_KEY: String = env_or_exit!("ADMIN_KEY"); 
+
+    /// Max length of email address (inclusive)
     pub static ref MAX_EMAIL_LENGTH: usize = env_or_default!("MAX_EMAIL_LENGTH", 30);
+
+    /// Max length of raw password (inclusive)
     pub static ref MAX_PASSWORD_LENGTH: usize = env_or_default!("MAX_PASSWORD_LENGTH", 30);
+
+    /// Minimum length of raw password (inclusive)
     pub static ref MIN_PASSWORD_LENGTH: usize = env_or_default!("MIX_PASSWORD_LENGTH", 6);
+
+    /// Max length of raw username, must be at least 8 characters long
     pub static ref MAX_USERNAME_LENGTH: usize = {
-        // We need this to be at least 7 long
+
+        // We need this to be at least 8 long
         let length = env_or_default!("MAX_USERNAME_LENGTH", 30);
         match length {
             8.. => length,
             _ => 30
         }
     };
-    pub static ref CREATION_CODE: String = {
-        match env::var("CREATION_CODE").ok() {
-            Some(v) => v,
-            None => {
-                error!("fill out CREATION_CODE in env");
-                std::process::exit(1);
-            }
-        }
-    };
+
+    /// Supplied code used for signup
+    pub static ref CREATION_CODE: String = env_or_exit!("CREATION_CODE"); 
 }
 
 /// Constant time comparison, when we perform a lookup of passwords we want to prevent a timeout
 /// from occuring.
-///
-/// Sha3 512 hash has a fixed length so we can use this comparison function to ensure that we have
-/// no issues and it's secure
-// TODO
-// replace since we know length of sha3 512 hash
 #[macro_export]
 macro_rules! constant_time_compare {
     ($val1:expr, $val2:expr) => {
@@ -64,6 +57,7 @@ macro_rules! constant_time_compare {
     };
 }
 
+/// UnixTimestamp since epoch in seconds
 macro_rules! timestamp {
     () => {
         SystemTime::now()
@@ -75,6 +69,8 @@ macro_rules! timestamp {
 
 pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
     let mut teams = Vec::with_capacity(1);
+
+    // ensure that we only get valid teams
     for e in t {
         teams.push(match e.as_str() {
             "FTC1002" | "FTC11347" | "FRC1002" | "BEST" => e,
@@ -89,6 +85,7 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
     {
         return Err(ResponseError::InvalidTeamAssignment);
     }
+
     Ok(teams)
 }
 
@@ -102,6 +99,7 @@ pub(crate) struct NewAccount {
     pub team: Vec<String>,
     pub email: String,
     pub creation_timestamp: u64,
+    pub admin: bool
 }
 
 #[derive(Deserialize)]
@@ -113,11 +111,13 @@ pub(crate) struct CreateAccountEvent {
     pub graduation_year: u16,
     pub team: Vec<String>,
     pub email: String,
+    pub admin_key: Option<String>
 }
 
 impl CreateAccountEvent {
     pub(crate) fn validate_account(a: CreateAccountEvent) -> Result<NewAccount, ResponseError> {
-        if a.creation_code == *CREATION_CODE {
+
+        if !constant_time_compare!(a.creation_code, *CREATION_CODE) {
             return Err(ResponseError::InvalidCreationCode);
         }
 
@@ -133,6 +133,7 @@ impl CreateAccountEvent {
             creation_timestamp: timestamp!(),
             first_name: a.first_name,
             last_name: a.last_name,
+            admin: Self::is_admin(a.admin_key)
         })
     }
 
@@ -150,15 +151,16 @@ impl CreateAccountEvent {
 
     // The first/last name should be valid since we check the display name first, this function
     // assumes that the last name is not empty
-    //
-    // Username format is first.last_initial-grad_year
+    /// Generate username of user based on {first}.{last_initial}-{grad_year} format
     fn generate_username(first: &str, last: &str, grad_year: u16) -> Result<String, ResponseError> {
         let lastname_initial = last.chars().collect::<Vec<char>>()[0];
 
         Ok(format!("{first}.{lastname_initial}-{grad_year}"))
     }
 
+    /// Check the raw password against given length constraints and hash it
     fn validate_password(password: &str) -> Result<String, ResponseError> {
+
         if password.len() > *MAX_PASSWORD_LENGTH || password.len() < *MIN_PASSWORD_LENGTH {
             return Err(ResponseError::InvalidPassword);
         }
@@ -173,15 +175,40 @@ impl CreateAccountEvent {
         for byte in hasher.finalize() {
             hex_string.push_str(&format!("{:02X}", byte));
         }
+
         Ok(hex_string)
     }
 
+    /// Compare the year given to see if it's more than 4 years from now or more than 1 year ago
     fn validate_graduation_year(year: u16) -> Result<u16, ResponseError> {
-        unimplemented!();
+
+        // If it's less than 1970 we could cause the year to wrap in release mode when subtracting
+        // 1970, this would technically be fine since it would not pass the second set of
+        // conditions but it's better to be safe
+        if year < 1970 {
+            return Err(ResponseError::InvalidGraduationYear);
+        }
+
+        // Unix epoch is 1970
+        let mut offset = year as u64 - 1970;
+
+        // seconds in a year
+        offset *= 31557600;
+
+        let date = timestamp!();
+
+        // if the given year is more than 1 year ago or greater than 4 years from now we responde
+        // with an error
+        if offset < date - 31557600 || offset > date + 126230400 {
+            return Err(ResponseError::InvalidGraduationYear);
+        } 
+
+        Ok(year)
     }
 
     /// Veryify provided email against name@domain.com regex pattern, then trim the result
     fn validate_email(email: &str) -> Result<String, ResponseError> {
+
         // you know it's gonna be good when the regex is taken from some random stack overflow post
         // :D
         let email_regex = Regex::new(r#"(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])"#).expect("Invalid Regex Provided");
@@ -189,6 +216,13 @@ impl CreateAccountEvent {
         match email_regex.is_match(email) && email.len() < *MAX_EMAIL_LENGTH {
             true => Ok(email.trim().to_owned()),
             false => Err(ResponseError::InvalidEmail),
+        }
+    }
+
+    fn is_admin(key: Option<String>) -> bool {
+        match key {
+            Some(v) => constant_time_compare!(v, *ADMIN_KEY),
+            None => false
         }
     }
 }

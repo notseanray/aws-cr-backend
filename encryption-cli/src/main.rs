@@ -39,23 +39,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let file = args.contains(&String::from("--file")) || args.contains(&String::from("-f"));
 
     if args.contains(&String::from("--encrypt")) || args.contains(&String::from("-e")) {
-        let base64 = mc.encrypt_to_base64(&args[2]);
-        println!("ecrypted with key: {key}\n{base64}");
+        let data = {
+            if file {
+                fs::read_to_string(&args[3])?
+            } else {
+                args[2].clone()
+            }
+        };
+        let base64 = mc.encrypt_to_base64(&data);
+        println!("encrypted with key: {key}\n{base64}");
+    } else {
+        let base64 = mc.decrypt_base64_to_string(&args[2]).expect("Invalid Data");
+        println!("decrypted with key: {key}\n{base64}");
         if file {
             let mut output = OpenOptions::new().write(true).create(true).open(key)?;
 
             writeln!(&mut output, "{:#?}", base64)?;
         }
-    } else {
-        let data = {
-            if file {
-                fs::read_to_string(args[2].clone())?
-            } else {
-                args[2].clone()
-            }
-        };
-        let base64 = mc.decrypt_base64_to_string(data).expect("Invalid Data");
-        println!("decrypted with key: {key}\n{base64}");
     }
     Ok(())
 }

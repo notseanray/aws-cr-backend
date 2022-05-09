@@ -1,8 +1,3 @@
-use crate::{CreateAccountEvent, PaymentEvent, ResponseError};
-use lambda_runtime::{Error as LambdaError, LambdaEvent};
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-
 mod accounts;
 mod payment;
 mod response;
@@ -16,6 +11,45 @@ use storage::*;
 #[cfg(test)]
 mod tests;
 
+use crate::{CreateAccountEvent, PaymentEvent, ResponseError};
+use lambda_runtime::{Error as LambdaError, LambdaEvent};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use magic_crypt::{new_magic_crypt, MagicCryptTrait};
+use lazy_static::lazy_static;
+use std::env;
+use log::error;
+
+lazy_static! {
+    static ref ENCRYPTION_KEY: String = env_or_exit!("ENCRYPTION_KEY");
+}
+
+/// Load the specified environment variable or substitute it for a default if it's not present
+#[macro_export]
+macro_rules! env_or_default {
+    ($var:expr, $default:expr) => {
+        match env::var($var).ok() {
+            Some(v) => v.parse().unwrap_or($default),
+            None => $default,
+        }
+    };
+}
+
+/// Load the specified environment variable or exit if it is not present
+#[macro_export]
+macro_rules! env_or_exit {
+    ($var:expr) => {
+        match env::var($var).ok() {
+            Some(v) => v,
+            None => {
+                error!("please fill out {} in env", $var);
+                std::process::exit(1);
+            }
+        } 
+    };
+}
+
+
 #[derive(Serialize)]
 pub(crate) struct BackendResponse {
     pub response: BackendResponseContents,
@@ -24,10 +58,10 @@ pub(crate) struct BackendResponse {
 // hash first.password.creation timestamp
 
 #[derive(Serialize)]
+#[serde(untagged)]
 pub(crate) enum BackendResponseContents {
     ResponseCode(usize),
-    ResponseMessage(String), // json struct response
-    ErrorMessage(String),
+    ResponseMessage(String)
 }
 
 #[derive(Deserialize)]
@@ -42,6 +76,7 @@ pub(crate) struct Ping {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
 pub(crate) enum EventTypes {
     CreateAccount(CreateAccountEvent),
     Payment(PaymentEvent),
@@ -49,12 +84,31 @@ pub(crate) enum EventTypes {
     PingRequest(Ping),
 }
 
+#[derive(Deserialize)]
+pub(crate) struct Data {
+    pub payload: String
+}
+
 pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError> {
     let (event, _context) = e.into_parts();
-    let backend_event: EventTypes = match serde_json::from_value(event) {
+
+    let request: Data = match serde_json::from_value(event) {
+        Ok(v) => v,
+        Err(_) => return Err(Box::new(ResponseError::MalformedRequest)),
+    };
+
+    let decrypt = new_magic_crypt!(&*ENCRYPTION_KEY, 256);
+
+    let data = match decrypt.decrypt_base64_to_string(request.payload) {
+        Ok(v) => v,
+        Err(_) => return Err(Box::new(ResponseError::InvalidDecryptionResult))
+    };
+
+    let backend_event: EventTypes = match serde_json::from_str(&data) {
         Ok(v) => v,
         Err(_) => return Err(Box::new(ResponseError::InvalidRequest)),
     };
+
     type R = EventTypes;
     Ok(json!(match backend_event {
         R::CreateAccount(v) => handle_create_account(v).await?,

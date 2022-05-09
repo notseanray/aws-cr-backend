@@ -227,6 +227,7 @@ dependencies = [
  "lambda_runtime",
  "lazy_static",
  "log",
+ "magic-crypt",
  "pretty_env_logger",
  "regex",
  "rusoto_core",
