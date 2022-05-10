@@ -1,22 +1,18 @@
 All data will be encrypted with AES-256 via MagicCrypt
 
 #### users table:
-Composite Primary Key
-
 Primary key: HASH
-
-Sort Key: RANGE
 
 | Key                 | Type          | Special  	  |
 |---------------------|---------------|---------------|
-| first_name          | String        |          	  | 
-| last_name           | String        | 			  |
-| display_name        | String        | 			  |
-| username            | String        | attribute     |
-| password            | String        | sort key      |
-| graduation_year     | u16           |               |
+| first_name          | String        | attribute     | 
+| last_name           | String        | attribute     |
+| display_name        | String        | attribute     |
+| username            | String        | primary key   |
+| password            | String        | attribute     |
+| graduation_year     | u16           | attribute     |
 | team  		      | Vec<String>   | attribute     |
-| email               | String        | partition key |
-| creation_timestamp  | u64           |	   			  |
-| lastlogin_timestamp | u64           |				  |
+| email               | String        | attribute     |
+| creation_timestamp  | u64           | attribute     |
+| lastlogin_timestamp | u64           | attribute     |
 

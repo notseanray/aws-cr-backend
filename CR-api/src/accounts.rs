@@ -1,4 +1,5 @@
 use crate::ResponseError;
+use rusoto_dynamodb::{UpdateTableInput, PutItemInput, PutItemError, AttributeValue, Put};
 use lazy_static::lazy_static;
 use log::error;
 use regex::Regex;
@@ -6,7 +7,7 @@ use serde::Deserialize;
 use sha3::{Digest, Sha3_512};
 use std::{
     env,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH}, collections::HashMap,
 };
 use crate::{env_or_exit, env_or_default};
 
@@ -78,10 +79,14 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
         });
     }
 
-    // janky as hell, but verify that someone isn't on both FTC teams
+    // janky as hell, but verify that someone isn't on both FTC teams and that they aren't on an
+    // FTC and best team
     if teams.is_empty()
-        || teams.len() > 3
+        || teams.len() > 2
         || teams.contains(&String::from("FTC1002")) && teams.contains(&String::from("FTC11347"))
+        || (teams.contains(&String::from("FTC1002")) || teams.contains(&String::from("FTC11347"))) 
+            && teams.contains(&String::from("BEST")
+        )
     {
         return Err(ResponseError::InvalidTeamAssignment);
     }
@@ -90,8 +95,6 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
 }
 
 pub(crate) struct NewAccount {
-    pub first_name: String,
-    pub last_name: String,
     pub display_name: String,
     pub username: String,
     pub password: String,
@@ -100,6 +103,130 @@ pub(crate) struct NewAccount {
     pub email: String,
     pub creation_timestamp: u64,
     pub admin: bool
+}
+
+macro_rules! insert_string {
+    ($map:expr, $key:expr, $val:expr) => {
+        $map.insert(
+            String::from($key), 
+            AttributeValue {
+                b: None,
+                r#bool: None,
+                bs: None,
+                l: None,
+                m: None,
+                n: None,
+                ns: None,
+                null: None,
+                ss: None,
+                s: Some(String::from($val)),
+            }
+        );
+    };
+}
+
+
+impl From<NewAccount> for PutItemInput {
+    fn from(a: NewAccount) -> PutItemInput {
+        let mut items = HashMap::with_capacity(8);
+        insert_string!(items, "username", a.username);
+        insert_string!(items, "password", a.password);
+        insert_string!(items, "email", a.email);
+        insert_string!(items, "display_name", a.display_name);
+
+        let mut teams = Vec::with_capacity(a.team.len());
+        a.team.iter().for_each(|x| 
+           teams.push(           
+               AttributeValue {
+                b: None,
+                r#bool: None,
+                bs: None,
+                l: None,
+                m: None,
+                n: None,
+                ns: None,
+                null: None,
+                ss: None,
+                s: Some(x.to_owned()),
+            }
+        ));
+
+        let team = AttributeValue {
+                b: None,
+                r#bool: None,
+                bs: None,
+                l: Some(teams),
+                m: None,
+                n: None,
+                ns: None,
+                null: None,
+                ss: None,
+                s: None,
+            };
+
+        items.insert(String::from("team"), team);
+
+        items.insert(
+            String::from("creation_timestamp"), 
+            AttributeValue {
+                b: None,
+                r#bool: None,
+                bs: None,
+                l: None,
+                m: None,
+                n: Some(a.creation_timestamp.to_string()),
+                ns: None,
+                null: None,
+                ss: None,
+                s: None,
+            }
+        );
+
+        items.insert(
+            String::from("graduation_year"), 
+            AttributeValue {
+                b: None,
+                r#bool: None,
+                bs: None,
+                l: None,
+                m: None,
+                n: Some(a.graduation_year.to_string()),
+                ns: None,
+                null: None,
+                ss: None,
+                s: None,
+            }
+        );
+
+        items.insert(
+            String::from("admin"), 
+            AttributeValue {
+                b: None,
+                r#bool: Some(a.admin),
+                bs: None,
+                l: None,
+                m: None,
+                n: None,
+                ns: None,
+                null: None,
+                ss: None,
+                s: None,
+            }
+        );
+
+        PutItemInput {
+            condition_expression: Some(String::from("attribute_not_exists")),
+            conditional_operator: None,
+            expected: None,
+            expression_attribute_names: None,
+            expression_attribute_values: None,
+            item: items,
+            return_consumed_capacity: None,
+            return_item_collection_metrics: None,
+            return_values: None,
+            table_name: String::from("userauth") // TODO replace with env
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -131,8 +258,6 @@ impl CreateAccountEvent {
             team: match_team(a.team)?,
             email: Self::validate_email(&a.email)?,
             creation_timestamp: timestamp!(),
-            first_name: a.first_name,
-            last_name: a.last_name,
             admin: Self::is_admin(a.admin_key)
         })
     }
