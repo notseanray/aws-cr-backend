@@ -2,23 +2,25 @@ mod accounts;
 mod payment;
 mod response;
 mod storage;
+mod admin;
 
 use accounts::*;
 use payment::*;
 use response::*;
 use storage::*;
+use admin::*;
 
 #[cfg(test)]
 mod tests;
 
 use crate::{CreateAccountEvent, PaymentEvent, ResponseError};
 use lambda_runtime::{Error as LambdaError, LambdaEvent};
+use lazy_static::lazy_static;
+use log::error;
+use magic_crypt::{new_magic_crypt, MagicCryptTrait};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use magic_crypt::{new_magic_crypt, MagicCryptTrait};
-use lazy_static::lazy_static;
 use std::env;
-use log::error;
 
 lazy_static! {
     static ref ENCRYPTION_KEY: String = env_or_exit!("ENCRYPTION_KEY");
@@ -45,29 +47,36 @@ macro_rules! env_or_exit {
                 error!("please fill out {} in env", $var);
                 std::process::exit(1);
             }
-        } 
+        }
     };
 }
-
 
 #[derive(Serialize)]
 pub(crate) struct BackendResponse {
     pub response: BackendResponseContents,
 }
 
-// hash first.password.creation timestamp
-
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum BackendResponseContents {
     ResponseCode(usize),
-    ResponseMessage(String)
+    ResponseMessage(String),
+}
+
+#[derive(Serialize)]
+pub(crate) struct UpdateUserRequest {
+    pub token: String,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub password: Option<String>,
+    pub email: Option<String>
 }
 
 #[derive(Deserialize)]
 pub(crate) struct LoginEvent {
     pub email: String,
     pub password: String,
+    pub grad_year: u16,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -86,7 +95,7 @@ pub(crate) enum EventTypes {
 
 #[derive(Deserialize)]
 pub(crate) struct Data {
-    pub payload: String
+    pub payload: String,
 }
 
 pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError> {
@@ -101,7 +110,7 @@ pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError>
 
     let data = match decrypt.decrypt_base64_to_string(request.payload) {
         Ok(v) => v,
-        Err(_) => return Err(Box::new(ResponseError::InvalidDecryptionResult))
+        Err(_) => return Err(Box::new(ResponseError::InvalidDecryptionResult)),
     };
 
     let backend_event: EventTypes = match serde_json::from_str(&data) {
@@ -134,7 +143,8 @@ pub(crate) async fn handle_ping(e: Ping) -> Result<BackendResponse, ResponseErro
         ),
     })
 }
-
+// TODO
+// Paypal webtook
 pub(crate) async fn handle_payment(e: PaymentEvent) -> Result<BackendResponse, ResponseError> {
     Ok(BackendResponse {
         response: BackendResponseContents::ResponseCode(200),
@@ -143,6 +153,10 @@ pub(crate) async fn handle_payment(e: PaymentEvent) -> Result<BackendResponse, R
 
 pub(crate) async fn handle_login_request(e: LoginEvent) -> Result<BackendResponse, ResponseError> {
     Ok(BackendResponse {
-        response: BackendResponseContents::ResponseCode(200),
+        response: match validate_login(e).await {
+            Ok((true, Some(v))) => BackendResponseContents::ResponseMessage(v),
+            Err(e) => BackendResponseContents::ResponseMessage(e.to_string()),
+            _ => BackendResponseContents::ResponseCode(400),
+        },
     })
 }

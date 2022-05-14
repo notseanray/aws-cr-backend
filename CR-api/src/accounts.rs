@@ -1,20 +1,20 @@
 use crate::ResponseError;
-use rusoto_dynamodb::{UpdateTableInput, PutItemInput, PutItemError, AttributeValue, Put};
+use crate::{env_or_default, env_or_exit};
 use lazy_static::lazy_static;
 use log::error;
 use regex::Regex;
+use rusoto_dynamodb::{AttributeValue, PutItemInput};
 use serde::Deserialize;
 use sha3::{Digest, Sha3_512};
 use std::{
+    collections::HashMap,
     env,
-    time::{SystemTime, UNIX_EPOCH}, collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
 };
-use crate::{env_or_exit, env_or_default};
-
 
 lazy_static! {
     /// Key used to sign up an admin account
-    pub static ref ADMIN_KEY: String = env_or_exit!("ADMIN_KEY"); 
+    pub static ref ADMIN_KEY: String = env_or_exit!("ADMIN_KEY");
 
     /// Max length of email address (inclusive)
     pub static ref MAX_EMAIL_LENGTH: usize = env_or_default!("MAX_EMAIL_LENGTH", 30);
@@ -37,7 +37,7 @@ lazy_static! {
     };
 
     /// Supplied code used for signup
-    pub static ref CREATION_CODE: String = env_or_exit!("CREATION_CODE"); 
+    pub static ref CREATION_CODE: String = env_or_exit!("CREATION_CODE");
 }
 
 /// Constant time comparison, when we perform a lookup of passwords we want to prevent a timeout
@@ -59,6 +59,7 @@ macro_rules! constant_time_compare {
 }
 
 /// UnixTimestamp since epoch in seconds
+#[macro_export]
 macro_rules! timestamp {
     () => {
         SystemTime::now()
@@ -84,9 +85,8 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
     if teams.is_empty()
         || teams.len() > 2
         || teams.contains(&String::from("FTC1002")) && teams.contains(&String::from("FTC11347"))
-        || (teams.contains(&String::from("FTC1002")) || teams.contains(&String::from("FTC11347"))) 
-            && teams.contains(&String::from("BEST")
-        )
+        || (teams.contains(&String::from("FTC1002")) || teams.contains(&String::from("FTC11347")))
+            && teams.contains(&String::from("BEST"))
     {
         return Err(ResponseError::InvalidTeamAssignment);
     }
@@ -102,129 +102,86 @@ pub(crate) struct NewAccount {
     pub team: Vec<String>,
     pub email: String,
     pub creation_timestamp: u64,
-    pub admin: bool
+    pub token: String,
+    pub last_login: u64,
+    pub admin: bool,
+    pub registered: bool,
 }
 
+#[macro_export]
 macro_rules! insert_string {
     ($map:expr, $key:expr, $val:expr) => {
         $map.insert(
-            String::from($key), 
+            String::from($key),
             AttributeValue {
-                b: None,
-                r#bool: None,
-                bs: None,
-                l: None,
-                m: None,
-                n: None,
-                ns: None,
-                null: None,
-                ss: None,
                 s: Some(String::from($val)),
-            }
+                ..AttributeValue::default()
+            },
         );
     };
 }
 
+#[macro_export]
+macro_rules! insert_number {
+    ($map:expr, $key:expr, $val:expr) => {
+        $map.insert(
+            String::from($key),
+            AttributeValue {
+                n: Some($val.to_string()),
+                ..AttributeValue::default()
+            },
+        );
+    };
+}
+
+#[macro_export]
+macro_rules! insert_bool {
+    ($map:expr, $key:expr, $val:expr) => {
+        $map.insert(
+            String::from($key),
+            AttributeValue {
+                r#bool: Some($val),
+                ..AttributeValue::default()
+            },
+        );
+    };
+}
 
 impl From<NewAccount> for PutItemInput {
     fn from(a: NewAccount) -> PutItemInput {
-        let mut items = HashMap::with_capacity(8);
+        let mut items = HashMap::with_capacity(10);
         insert_string!(items, "username", a.username);
         insert_string!(items, "password", a.password);
         insert_string!(items, "email", a.email);
         insert_string!(items, "display_name", a.display_name);
+        insert_number!(items, "creation_timestamp", a.creation_timestamp);
+        insert_number!(items, "graduation_year", a.graduation_year);
+        insert_number!(items, "last_login", 0);
+        insert_bool!(items, "admin", a.admin);
+        // if they're an admin they are registered
+        insert_bool!(items, "registered", a.admin);
 
         let mut teams = Vec::with_capacity(a.team.len());
-        a.team.iter().for_each(|x| 
-           teams.push(           
-               AttributeValue {
-                b: None,
-                r#bool: None,
-                bs: None,
-                l: None,
-                m: None,
-                n: None,
-                ns: None,
-                null: None,
-                ss: None,
+        a.team.iter().for_each(|x| {
+            teams.push(AttributeValue {
                 s: Some(x.to_owned()),
-            }
-        ));
+                ..AttributeValue::default()
+            })
+        });
 
-        let team = AttributeValue {
-                b: None,
-                r#bool: None,
-                bs: None,
+        items.insert(
+            String::from("team"),
+            AttributeValue {
                 l: Some(teams),
-                m: None,
-                n: None,
-                ns: None,
-                null: None,
-                ss: None,
-                s: None,
-            };
-
-        items.insert(String::from("team"), team);
-
-        items.insert(
-            String::from("creation_timestamp"), 
-            AttributeValue {
-                b: None,
-                r#bool: None,
-                bs: None,
-                l: None,
-                m: None,
-                n: Some(a.creation_timestamp.to_string()),
-                ns: None,
-                null: None,
-                ss: None,
-                s: None,
-            }
-        );
-
-        items.insert(
-            String::from("graduation_year"), 
-            AttributeValue {
-                b: None,
-                r#bool: None,
-                bs: None,
-                l: None,
-                m: None,
-                n: Some(a.graduation_year.to_string()),
-                ns: None,
-                null: None,
-                ss: None,
-                s: None,
-            }
-        );
-
-        items.insert(
-            String::from("admin"), 
-            AttributeValue {
-                b: None,
-                r#bool: Some(a.admin),
-                bs: None,
-                l: None,
-                m: None,
-                n: None,
-                ns: None,
-                null: None,
-                ss: None,
-                s: None,
-            }
+                ..AttributeValue::default()
+            },
         );
 
         PutItemInput {
             condition_expression: Some(String::from("attribute_not_exists")),
-            conditional_operator: None,
-            expected: None,
-            expression_attribute_names: None,
-            expression_attribute_values: None,
             item: items,
-            return_consumed_capacity: None,
-            return_item_collection_metrics: None,
-            return_values: None,
-            table_name: String::from("userauth") // TODO replace with env
+            table_name: String::from("userauth"), // TODO replace with env
+            ..PutItemInput::default()
         }
     }
 }
@@ -238,15 +195,25 @@ pub(crate) struct CreateAccountEvent {
     pub graduation_year: u16,
     pub team: Vec<String>,
     pub email: String,
-    pub admin_key: Option<String>
+    pub admin_key: Option<String>,
+}
+
+// token expiration
+
+pub(crate) fn token_gen(username: &str, last_login: u64) -> String {
+    // #username.#timestamp.expires.#last_login
+    String::from("s")
 }
 
 impl CreateAccountEvent {
     pub(crate) fn validate_account(a: CreateAccountEvent) -> Result<NewAccount, ResponseError> {
-
         if !constant_time_compare!(a.creation_code, *CREATION_CODE) {
             return Err(ResponseError::InvalidCreationCode);
         }
+
+        let admin = Self::is_admin(a.admin_key);
+
+        let time = timestamp!();
 
         // These are intentionally out of order to prevent extra cloning of strings and to ensure
         // that things are verified in order
@@ -257,8 +224,11 @@ impl CreateAccountEvent {
             username: Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?,
             team: match_team(a.team)?,
             email: Self::validate_email(&a.email)?,
-            creation_timestamp: timestamp!(),
-            admin: Self::is_admin(a.admin_key)
+            creation_timestamp: time,
+            admin,
+            last_login: time,
+            registered: admin,
+            token: token_gen(&a.first_name, time, &a.last_name)
         })
     }
 
@@ -277,7 +247,11 @@ impl CreateAccountEvent {
     // The first/last name should be valid since we check the display name first, this function
     // assumes that the last name is not empty
     /// Generate username of user based on {first}.{last_initial}-{grad_year} format
-    fn generate_username(first: &str, last: &str, grad_year: u16) -> Result<String, ResponseError> {
+    pub(crate) fn generate_username(
+        first: &str,
+        last: &str,
+        grad_year: u16,
+    ) -> Result<String, ResponseError> {
         let lastname_initial = last.chars().collect::<Vec<char>>()[0];
 
         Ok(format!("{first}.{lastname_initial}-{grad_year}"))
@@ -285,7 +259,6 @@ impl CreateAccountEvent {
 
     /// Check the raw password against given length constraints and hash it
     fn validate_password(password: &str) -> Result<String, ResponseError> {
-
         if password.len() > *MAX_PASSWORD_LENGTH || password.len() < *MIN_PASSWORD_LENGTH {
             return Err(ResponseError::InvalidPassword);
         }
@@ -305,8 +278,8 @@ impl CreateAccountEvent {
     }
 
     /// Compare the year given to see if it's more than 4 years from now or more than 1 year ago
-    fn validate_graduation_year(year: u16) -> Result<u16, ResponseError> {
-
+    #[inline(always)]
+    pub(crate) fn validate_graduation_year(year: u16) -> Result<u16, ResponseError> {
         // If it's less than 1970 we could cause the year to wrap in release mode when subtracting
         // 1970, this would technically be fine since it would not pass the second set of
         // conditions but it's better to be safe
@@ -326,14 +299,13 @@ impl CreateAccountEvent {
         // with an error
         if offset < date - 31557600 || offset > date + 126230400 {
             return Err(ResponseError::InvalidGraduationYear);
-        } 
+        }
 
         Ok(year)
     }
 
     /// Veryify provided email against name@domain.com regex pattern, then trim the result
     fn validate_email(email: &str) -> Result<String, ResponseError> {
-
         // you know it's gonna be good when the regex is taken from some random stack overflow post
         // :D
         let email_regex = Regex::new(r#"(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9]))\.){3}(?:(2(5[0-5]|[0-4][0-9])|1[0-9][0-9]|[1-9]?[0-9])|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])"#).expect("Invalid Regex Provided");
@@ -347,7 +319,9 @@ impl CreateAccountEvent {
     fn is_admin(key: Option<String>) -> bool {
         match key {
             Some(v) => constant_time_compare!(v, *ADMIN_KEY),
-            None => false
+            None => false,
         }
     }
 }
+
+// Cloud gets zero bitches

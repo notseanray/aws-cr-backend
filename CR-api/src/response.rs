@@ -26,6 +26,6 @@ pub(crate) enum ResponseError {
     InvalidEmail,
     #[error("Invalid Timestamp")]
     InvalidTimestamp,
-    #[error("AWS Lambda Error: Failed to access database")]
-    FailedToAccessDatabase,
+    #[error("Invalid Credentials")]
+    InvalidCredentials,
 }

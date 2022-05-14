@@ -29,3 +29,9 @@ path = "src/main.rs"
 
 [target.x86_64-unknown-linux-musl]
 linker = "x86_64-linux-musl-gcc"
+
+# reduce binary size a tiny bit for lambda
+[profile.release]
+strip = true
+lto = "thin"
+panic = "abort"
