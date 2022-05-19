@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rusoto_core::{Region, RusotoError};
 use rusoto_dynamodb::{
-    DynamoDb, DynamoDbClient, GetItemInput, PutItemError, GetItemError, AttributeValue
+    DynamoDb, DynamoDbClient, GetItemInput, PutItemError, GetItemError, AttributeValue, UpdateItemInput
 };
 
 use crate::{
@@ -85,6 +85,13 @@ pub(crate) async fn validate_login(l: LoginEvent) -> Result<(bool, Option<String
         Ok(v) => v.item,
         Err(_) => return Err(ResponseError::InvalidCredentials),
     };
+
+    /*
+     * generate new token and update db + send to client
+    Ok(client.update_item(UpdateItemInput {
+
+    }))
+    */
 
     Ok(match items {
         Some(v) => {

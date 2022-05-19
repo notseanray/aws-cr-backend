@@ -21,3 +21,7 @@ Admin stuff:
 * lookup user
 * view forms and payment
 * add/remove events
+
+token:
+generate new token when new login
+token is made of #timestamp.b64expires.#username

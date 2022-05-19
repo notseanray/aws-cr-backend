@@ -5,7 +5,8 @@ use log::error;
 use regex::Regex;
 use rusoto_dynamodb::{AttributeValue, PutItemInput};
 use serde::Deserialize;
-use sha3::{Digest, Sha3_512};
+use magic_crypt::{new_magic_crypt, MagicCryptTrait};
+use sha3::{Digest, Sha3_256, Sha3_512};
 use std::{
     collections::HashMap,
     env,
@@ -15,6 +16,9 @@ use std::{
 lazy_static! {
     /// Key used to sign up an admin account
     pub static ref ADMIN_KEY: String = env_or_exit!("ADMIN_KEY");
+
+    /// Key used to encrypt encoding of token timestamp
+    pub static ref TOKEN_KEY: String = env_or_exit!("TOKEN_KEY");
 
     /// Max length of email address (inclusive)
     pub static ref MAX_EMAIL_LENGTH: usize = env_or_default!("MAX_EMAIL_LENGTH", 30);
@@ -198,11 +202,35 @@ pub(crate) struct CreateAccountEvent {
     pub admin_key: Option<String>,
 }
 
-// token expiration
+pub(crate) fn token_gen(username: &str, time: u64) -> String {
 
-pub(crate) fn token_gen(username: &str, last_login: u64) -> String {
-    // #username.#timestamp.expires.#last_login
-    String::from("s")
+    let mut hasher = Sha3_256::new();
+    hasher.update(time.to_string().as_bytes());
+
+    // sha3 256 is 128 characters long
+    let mut timestamp_hash = String::with_capacity(128);
+
+    // convert to hex string since it's easier to deal with
+    for byte in hasher.finalize() {
+        timestamp_hash.push_str(&format!("{:02X}", byte));
+    }
+
+    let mut hasher = Sha3_256::new();
+    hasher.update(username.as_bytes());
+
+    let mut username = String::with_capacity(128);
+
+    for byte in hasher.finalize() {
+        username.push_str(&format!("{:02X}", byte));
+    }
+
+    let encrypt = new_magic_crypt!(&*TOKEN_KEY, 128);
+    format!(
+        "{}.{}.{}", 
+        timestamp_hash,
+        encrypt.encrypt_str_to_base64((time + 864000).to_string()), // expires after 10 days
+        username,
+    )
 }
 
 impl CreateAccountEvent {
@@ -215,32 +243,27 @@ impl CreateAccountEvent {
 
         let time = timestamp!();
 
+        let username = Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?;
+
         // These are intentionally out of order to prevent extra cloning of strings and to ensure
         // that things are verified in order
         Ok(NewAccount {
+            username,
             display_name: Self::validate_display_name(&a.first_name, &a.last_name)?,
             password: Self::validate_password(&a.password)?,
             graduation_year: Self::validate_graduation_year(a.graduation_year)?,
-            username: Self::generate_username(&a.first_name, &a.last_name, a.graduation_year)?,
             team: match_team(a.team)?,
             email: Self::validate_email(&a.email)?,
             creation_timestamp: time,
             admin,
             last_login: time,
             registered: admin,
-            token: token_gen(&a.first_name, time, &a.last_name)
+            token: token_gen(&a.first_name, time)
         })
     }
 
     // Subtract 7 from here since .last_initial-grad_year would always be 7 long
     fn validate_display_name(first: &str, last: &str) -> Result<String, ResponseError> {
-        if first.len() < 2
-            || first.len() > *MAX_USERNAME_LENGTH - 7
-            || last.len() < 2
-            || last.len() > 15
-        {
-            return Err(ResponseError::InvalidName);
-        }
         Ok(format!("{first} {last}"))
     }
 
@@ -252,6 +275,14 @@ impl CreateAccountEvent {
         last: &str,
         grad_year: u16,
     ) -> Result<String, ResponseError> {
+        if first.len() < 2
+            || first.len() > *MAX_USERNAME_LENGTH - 7
+            || last.len() < 2
+            || last.len() > 15
+        {
+            return Err(ResponseError::InvalidName);
+        }
+
         let lastname_initial = last.chars().collect::<Vec<char>>()[0];
 
         Ok(format!("{first}.{lastname_initial}-{grad_year}"))
