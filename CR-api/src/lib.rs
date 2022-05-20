@@ -118,6 +118,7 @@ pub async fn dispatch_event(e: LambdaEvent<Value>) -> Result<Value, LambdaError>
         Err(_) => return Err(Box::new(ResponseError::InvalidRequest)),
     };
 
+    // ecrypt in the future
     type R = EventTypes;
     Ok(json!(match backend_event {
         R::CreateAccount(v) => handle_create_account(v).await?,

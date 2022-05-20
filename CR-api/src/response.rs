@@ -16,6 +16,8 @@ pub(crate) enum ResponseError {
     InvalidName,
     #[error("Invalid Username Provided")]
     InvalidUsername,
+    #[error("Invalid Token Provided")]
+    InvalidToken,
     #[error("Invalid Password Provided")]
     InvalidPassword,
     #[error("Invalid Creation Code")]
@@ -28,4 +30,6 @@ pub(crate) enum ResponseError {
     InvalidTimestamp,
     #[error("Invalid Credentials")]
     InvalidCredentials,
+    #[error("Invalid Permissions")]
+    InvalidPermissions,
 }

@@ -17,6 +17,9 @@ lazy_static! {
     /// Key used to sign up an admin account
     pub static ref ADMIN_KEY: String = env_or_exit!("ADMIN_KEY");
 
+    /// Key used to determine if it's a staff account during sign up
+    pub static ref STAFF_KEY: String = env_or_exit!("STAFF_KEY");
+
     /// Key used to encrypt encoding of token timestamp
     pub static ref TOKEN_KEY: String = env_or_exit!("TOKEN_KEY");
 
@@ -73,13 +76,13 @@ macro_rules! timestamp {
     };
 }
 
-pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
+pub(crate) fn match_team<T: AsRef<str> + PartialEq>(t: &[T]) -> Result<Vec<String>, ResponseError> {
     let mut teams = Vec::with_capacity(1);
 
     // ensure that we only get valid teams
     for e in t {
-        teams.push(match e.as_str() {
-            "FTC1002" | "FTC11347" | "FRC1002" | "BEST" => e,
+        teams.push(match e.as_ref() {
+            "FTC1002" | "FTC11347" | "FRC1002" | "BEST" => e.as_ref(),
             _ => return Err(ResponseError::InvalidTeam),
         });
     }
@@ -88,14 +91,17 @@ pub(crate) fn match_team(t: Vec<String>) -> Result<Vec<String>, ResponseError> {
     // FTC and best team
     if teams.is_empty()
         || teams.len() > 2
-        || teams.contains(&String::from("FTC1002")) && teams.contains(&String::from("FTC11347"))
-        || (teams.contains(&String::from("FTC1002")) || teams.contains(&String::from("FTC11347")))
-            && teams.contains(&String::from("BEST"))
+        || teams.contains(&"FTC1002") && teams.contains(&"FTC11347")
+        || (teams.contains(&"FTC1002") || teams.contains(&"FTC11347"))
+            && teams.contains(&"BEST")
     {
         return Err(ResponseError::InvalidTeamAssignment);
     }
 
-    Ok(teams)
+    let mut new_teams = Vec::with_capacity(teams.len());
+    teams.into_iter().for_each(|x| new_teams.push(x.to_owned()));
+
+    Ok(new_teams)
 }
 
 pub(crate) struct NewAccount {
@@ -106,9 +112,9 @@ pub(crate) struct NewAccount {
     pub team: Vec<String>,
     pub email: String,
     pub creation_timestamp: u64,
-    pub token: String,
     pub last_login: u64,
     pub admin: bool,
+    pub staff: bool,
     pub registered: bool,
 }
 
@@ -160,7 +166,7 @@ impl From<NewAccount> for PutItemInput {
         insert_string!(items, "display_name", a.display_name);
         insert_number!(items, "creation_timestamp", a.creation_timestamp);
         insert_number!(items, "graduation_year", a.graduation_year);
-        insert_number!(items, "last_login", 0);
+        insert_number!(items, "last_login", 0u8);
         insert_bool!(items, "admin", a.admin);
         // if they're an admin they are registered
         insert_bool!(items, "registered", a.admin);
@@ -168,7 +174,7 @@ impl From<NewAccount> for PutItemInput {
         let mut teams = Vec::with_capacity(a.team.len());
         a.team.iter().for_each(|x| {
             teams.push(AttributeValue {
-                s: Some(x.to_owned()),
+                s: Some(x.to_string()),
                 ..AttributeValue::default()
             })
         });
@@ -199,11 +205,10 @@ pub(crate) struct CreateAccountEvent {
     pub graduation_year: u16,
     pub team: Vec<String>,
     pub email: String,
-    pub admin_key: Option<String>,
+    pub position_key: Option<String>,
 }
 
 pub(crate) fn token_gen(username: &str, time: u64) -> String {
-
     let mut hasher = Sha3_256::new();
     hasher.update(time.to_string().as_bytes());
 
@@ -239,7 +244,7 @@ impl CreateAccountEvent {
             return Err(ResponseError::InvalidCreationCode);
         }
 
-        let admin = Self::is_admin(a.admin_key);
+        let admin = Self::is_admin(&a.position_key);
 
         let time = timestamp!();
 
@@ -248,17 +253,17 @@ impl CreateAccountEvent {
         // These are intentionally out of order to prevent extra cloning of strings and to ensure
         // that things are verified in order
         Ok(NewAccount {
-            username,
-            display_name: Self::validate_display_name(&a.first_name, &a.last_name)?,
+            username: username.to_lowercase(),
+            display_name: Self::validate_display_name(&a.first_name, &a.last_name)?.to_lowercase(),
             password: Self::validate_password(&a.password)?,
             graduation_year: Self::validate_graduation_year(a.graduation_year)?,
-            team: match_team(a.team)?,
+            team: match_team(a.team.as_slice())?.to_vec(),
             email: Self::validate_email(&a.email)?,
             creation_timestamp: time,
             admin,
+            staff: admin || Self::is_staff(&a.position_key),
             last_login: time,
             registered: admin,
-            token: token_gen(&a.first_name, time)
         })
     }
 
@@ -347,10 +352,17 @@ impl CreateAccountEvent {
         }
     }
 
-    fn is_admin(key: Option<String>) -> bool {
+    fn is_admin(key: &'_ Option<String>) -> bool {
         match key {
             Some(v) => constant_time_compare!(v, *ADMIN_KEY),
             None => false,
+        }
+    }
+
+    fn is_staff(key: &'_ Option<String>) -> bool {
+        match key {
+            Some(v) => constant_time_compare!(v, *STAFF_KEY),
+            None => false
         }
     }
 }

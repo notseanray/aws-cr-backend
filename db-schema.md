@@ -4,17 +4,29 @@ All data will be encrypted with AES-256 via MagicCrypt
 
 | Key                 | Type          | Special  	  |
 |---------------------|---------------|---------------|
-| display_name        | String        | attribute     |
 | username            | String        | primary key   |
+| display_name        | String        | attribute     |
 | password            | String        | attribute     |
 | graduation_year     | u16           | attribute     |
 | team  		      | Vec<String>   | attribute     |
 | email               | String        | attribute     |
 | creation_timestamp  | u64           | attribute     |
-| token               | String        | attribute     |
 | lastlogin           | u64           | attribute     |
 | admin               | bool          | attribute     |
+| staff               | bool          | attribute     |
 | registered          | bool          | attribute     |
+
+#### tokentable:
+| Key                 | Type          | Special  	  |
+|---------------------|---------------|---------------|
+| token               | String        | primary key   |
+| username            | String        | attribute     |
+
+#### usertable:
+| Key                 | Type          | Special  	  |
+|---------------------|---------------|---------------|
+| username            | String        | primary key   |
+| token               | String        | attribute     |
 
 #### eventstable:
 
@@ -26,7 +38,7 @@ possibly use LSI
 | type                | String        | primary key   |
 | name                | String        | attribute     |
 | date                | u64           | attribute     |
-| description         | Option<String>| attribute     |
+| description         | String        | attribute     |
 | attendence          | Vec<String>   | attribute     |
 
 #### logstable:
@@ -58,5 +70,5 @@ possibly use LSI
 | last_update         | u64           | attribute     |
 | last_update_by      | String        | attribute     |
 
-##### notes:
+### notes:
 * use BatchGetItemInput for viewing events or anything, faster

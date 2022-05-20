@@ -141,7 +141,7 @@ pub(crate) async fn token_from_username(username: &str) -> Result<String, Respon
     let query = GetItemInput {
         key: items,
         projection_expression: Some(String::from("token")),
-        table_name: String::from("userauth"),
+        table_name: String::from("usertable"),
         ..GetItemInput::default()
     };
     let client = DynamoDbClient::new(find_region!());
@@ -156,10 +156,134 @@ pub(crate) async fn token_from_username(username: &str) -> Result<String, Respon
     };
     match &token.s {
         Some(v) => Ok(v.clone()),
-        None => return Err(ResponseError::InvalidCredentials)
+        None => Err(ResponseError::InvalidCredentials)
     } 
 } 
 
-pub(crate) async fn credentials_from_token(token: &str) -> Result<String, ResponseError> {
-    Ok(String::from("test"))
+pub(crate) async fn username_from_token(token: &str) -> Result<String, ResponseError> {
+    let mut items = HashMap::with_capacity(1);
+    insert_string!(items, "token", token);
+    let query = GetItemInput {
+        key: items,
+        projection_expression: Some(String::from("username")),
+        table_name: String::from("tokentable"),
+        ..GetItemInput::default()
+    };
+    let client = DynamoDbClient::new(find_region!());
+    // this is really janky should fix soon
+    let items = match unwrap_db_result!(client.get_item(query).await) {
+        Some(v) => v,
+        None => return Err(ResponseError::InvalidToken)
+    };
+    let username = match items.get("username") {
+        Some(v) => v,
+        None => return Err(ResponseError::InvalidCredentials)
+    };
+    match &username.s {
+        Some(v) => Ok(v.clone()),
+        None => Err(ResponseError::InvalidCredentials)
+    } 
+} 
+
+
+macro_rules! get_string_or_return {
+    ($map:expr, $val:expr) => {
+        match $map.get($val) {
+            Some(v) => v.s.clone().unwrap_or_default(),
+            None => return Err(ResponseError::InvalidCredentials)
+        }
+    };
+}
+
+macro_rules! get_or_return {
+    ($map:expr, $val:expr) => {
+        match $map.get($val) {
+            Some(v) => v,
+            None => return Err(ResponseError::InvalidCredentials)
+        }
+    };
+}
+
+pub(crate) async fn is_admin(token: &str) -> bool {
+    let username = match username_from_token(token).await {
+        Ok(v) => v,
+        Err(_) => return false
+    };
+    let user = match userdata_from_username(&username).await {
+        Ok(v) => v,
+        Err(_) => return false
+    };
+    user.admin
+}
+
+pub(crate) async fn userdata_from_username(username: &str) -> Result<NewAccount, ResponseError> {
+    let mut items = HashMap::with_capacity(1);
+    insert_string!(items, "username", username);
+    let query = GetItemInput {
+        key: items,
+        projection_expression: Some(String::from("display_name, username, password, graduation_year, team, email, creation_timestamp, last_login, admin, staff, registered")),
+        table_name: String::from("userauth"),
+        ..GetItemInput::default()
+    };
+    let client = DynamoDbClient::new(find_region!());
+    let items = match unwrap_db_result!(client.get_item(query).await) {
+        Some(v) => v,
+        None => return Err(ResponseError::InvalidToken)
+    };
+
+    // this is awful, but the dynamo api makes it difficult to deal with
+    Ok(NewAccount {
+        display_name: get_string_or_return!(items, "display_name"),
+        username: get_string_or_return!(items, "username"),
+        password: get_string_or_return!(items, "password"),
+        graduation_year: get_or_return!(items, "graduation_year").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        team: convert_attribute_vec_to_vec(get_or_return!(items, "team").l.clone().unwrap_or_default()),
+        email: get_string_or_return!(items, "email"),
+        creation_timestamp: get_or_return!(items, "creation_timestamp").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        last_login: get_or_return!(items, "last_login").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        admin: get_or_return!(items, "admin").bool.unwrap_or_default(),
+        staff: get_or_return!(items, "staff").bool.unwrap_or_default(),
+        registered: get_or_return!(items, "registered").bool.unwrap_or_default()
+    })
+}
+
+#[inline(always)]
+fn convert_attribute_vec_to_vec(a: Vec<AttributeValue>) -> Vec<String> {
+    let mut values = Vec::with_capacity(a.len());
+    a.iter().for_each(|x| values.push(x.s.clone().unwrap_or_default()));
+    values
+} 
+
+pub(crate) async fn update_admin_table() {}
+
+pub(crate) async fn load_admin_table() {
+    let mut items = HashMap::with_capacity(1);
+    insert_string!(items, "username", username);
+    let query = GetItemInput {
+        key: items,
+        projection_expression: Some(String::from("display_name, username, password, graduation_year, team, email, creation_timestamp, last_login, admin, staff, registered")),
+        table_name: String::from("userauth"),
+        ..GetItemInput::default()
+    };
+    let client = DynamoDbClient::new(find_region!());
+    let items = match unwrap_db_result!(client.get_item(query).await) {
+        Some(v) => v,
+        None => return Err(ResponseError::InvalidToken)
+    };
+
+    // this is awful, but the dynamo api makes it difficult to deal with
+    Ok(NewAccount {
+        display_name: get_string_or_return!(items, "display_name"),
+        username: get_string_or_return!(items, "username"),
+        password: get_string_or_return!(items, "password"),
+        graduation_year: get_or_return!(items, "graduation_year").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        team: convert_attribute_vec_to_vec(get_or_return!(items, "team").l.clone().unwrap_or_default()),
+        email: get_string_or_return!(items, "email"),
+        creation_timestamp: get_or_return!(items, "creation_timestamp").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        last_login: get_or_return!(items, "last_login").n.clone().unwrap_or_default().parse().unwrap_or_default(),
+        admin: get_or_return!(items, "admin").bool.unwrap_or_default(),
+        staff: get_or_return!(items, "staff").bool.unwrap_or_default(),
+        registered: get_or_return!(items, "registered").bool.unwrap_or_default()
+    })
+
 }
