@@ -54,7 +54,6 @@ impl UpdateAdminDetailsEvent {
 
 #[derive(Deserialize)]
 pub(crate) struct UpdateAdminDetails {
-    pub master_key: Option<String>,
     pub creation_code: Option<String>,
     pub admin_key: Option<String>,
     pub token_key: Option<String>,

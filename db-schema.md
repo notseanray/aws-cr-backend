@@ -54,9 +54,10 @@ possibly use LSI
 
 
 #### admintable:
+
 | Key                 | Type          | Special  	  |
 |---------------------|---------------|---------------|
-| year                | u32           | primary key   |
+| edition             | u32           | primary key   |
 | creation_code       | String        | attribute     |
 | admin_key           | String        | attribute     |
 | max_email_length    | u32           | attribute     |

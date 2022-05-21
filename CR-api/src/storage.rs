@@ -8,7 +8,7 @@ use rusoto_dynamodb::{
 use crate::{
     accounts::{NewAccount, MAX_USERNAME_LENGTH},
     response::ResponseError,
-    timestamp, LoginEvent, insert_string,
+    timestamp, LoginEvent, insert_string, admin::UpdateAdminDetails,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -237,7 +237,7 @@ pub(crate) async fn userdata_from_username(username: &str) -> Result<NewAccount,
         username: get_string_or_return!(items, "username"),
         password: get_string_or_return!(items, "password"),
         graduation_year: get_or_return!(items, "graduation_year").n.clone().unwrap_or_default().parse().unwrap_or_default(),
-        team: convert_attribute_vec_to_vec(get_or_return!(items, "team").l.clone().unwrap_or_default()),
+        team: convert_attribute_vec_to_vec(&get_or_return!(items, "team").l.clone().unwrap_or_default()).to_vec(),
         email: get_string_or_return!(items, "email"),
         creation_timestamp: get_or_return!(items, "creation_timestamp").n.clone().unwrap_or_default().parse().unwrap_or_default(),
         last_login: get_or_return!(items, "last_login").n.clone().unwrap_or_default().parse().unwrap_or_default(),
@@ -248,17 +248,15 @@ pub(crate) async fn userdata_from_username(username: &str) -> Result<NewAccount,
 }
 
 #[inline(always)]
-fn convert_attribute_vec_to_vec(a: Vec<AttributeValue>) -> Vec<String> {
-    let mut values = Vec::with_capacity(a.len());
-    a.iter().for_each(|x| values.push(x.s.clone().unwrap_or_default()));
-    values
+fn convert_attribute_vec_to_vec(a: &[AttributeValue]) -> Vec<String> {
+    a.iter().map(|x| x.s.clone().unwrap_or_default()).collect()
 } 
 
 pub(crate) async fn update_admin_table() {}
 
-pub(crate) async fn load_admin_table() {
+pub(crate) async fn load_admin_table() -> Result<UpdateAdminDetails, ResponseError> {
     let mut items = HashMap::with_capacity(1);
-    insert_string!(items, "username", username);
+    //insert_string!(items, "username", username);
     let query = GetItemInput {
         key: items,
         projection_expression: Some(String::from("display_name, username, password, graduation_year, team, email, creation_timestamp, last_login, admin, staff, registered")),
@@ -271,19 +269,10 @@ pub(crate) async fn load_admin_table() {
         None => return Err(ResponseError::InvalidToken)
     };
 
-    // this is awful, but the dynamo api makes it difficult to deal with
-    Ok(NewAccount {
-        display_name: get_string_or_return!(items, "display_name"),
-        username: get_string_or_return!(items, "username"),
-        password: get_string_or_return!(items, "password"),
-        graduation_year: get_or_return!(items, "graduation_year").n.clone().unwrap_or_default().parse().unwrap_or_default(),
-        team: convert_attribute_vec_to_vec(get_or_return!(items, "team").l.clone().unwrap_or_default()),
-        email: get_string_or_return!(items, "email"),
-        creation_timestamp: get_or_return!(items, "creation_timestamp").n.clone().unwrap_or_default().parse().unwrap_or_default(),
-        last_login: get_or_return!(items, "last_login").n.clone().unwrap_or_default().parse().unwrap_or_default(),
-        admin: get_or_return!(items, "admin").bool.unwrap_or_default(),
-        staff: get_or_return!(items, "staff").bool.unwrap_or_default(),
-        registered: get_or_return!(items, "registered").bool.unwrap_or_default()
+    unimplemented!();
+    /*
+    Ok(UpdateAdminDetails {
+        creation_code: 
     })
-
+    */
 }

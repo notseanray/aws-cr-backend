@@ -1,3 +1,4 @@
+#!/bin/python
 import boto3
 from environs import Env 
 import sys
