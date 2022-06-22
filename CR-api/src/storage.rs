@@ -19,7 +19,7 @@ macro_rules! find_region {
         // also regions under construction for complete-ness?
         // might have to convert to function and disable inlining if bin size is a issue
         // <https://awsregion.info/>
-        match option_env!("AWS_REGION").unwrap_or_default() {
+        match option_env!("SET_AWS_REGION").unwrap_or_default() {
             "us-east-1" => Region::UsEast1,
             "us-east-2" => Region::UsEast2,
             "us-west-1" => Region::UsWest1,
@@ -95,7 +95,7 @@ pub(crate) async fn validate_login(l: LoginEvent) -> Result<(bool, Option<String
 
     Ok(match items {
         Some(v) => {
-            if !v.is_empty() && v.len() == 1 {
+            if v.len() == 1 {
                 (
                     true,
                     Some({
@@ -119,7 +119,7 @@ macro_rules! unwrap_db_result {
         match $val {
             Ok(v) => match v.item {
                 Some(v) => {
-                    if !v.is_empty() && v.len() == 1 {
+                    if v.len() == 1 {
                         Some(v)
                     } else {
                         None
@@ -157,8 +157,8 @@ pub(crate) async fn token_from_username(username: &str) -> Result<String, Respon
     match &token.s {
         Some(v) => Ok(v.clone()),
         None => Err(ResponseError::InvalidCredentials)
-    } 
-} 
+    }
+}
 
 pub(crate) async fn username_from_token(token: &str) -> Result<String, ResponseError> {
     let mut items = HashMap::with_capacity(1);
@@ -182,8 +182,8 @@ pub(crate) async fn username_from_token(token: &str) -> Result<String, ResponseE
     match &username.s {
         Some(v) => Ok(v.clone()),
         None => Err(ResponseError::InvalidCredentials)
-    } 
-} 
+    }
+}
 
 
 macro_rules! get_string_or_return {
@@ -204,16 +204,10 @@ macro_rules! get_or_return {
     };
 }
 
-pub(crate) async fn is_admin(token: &str) -> bool {
-    let username = match username_from_token(token).await {
-        Ok(v) => v,
-        Err(_) => return false
-    };
-    let user = match userdata_from_username(&username).await {
-        Ok(v) => v,
-        Err(_) => return false
-    };
-    user.admin
+pub(crate) async fn is_admin(token: &str) -> Result<bool, ResponseError> {
+    let username = username_from_token(token).await?;
+    let user = userdata_from_username(&username).await?;
+    Ok(user.admin)
 }
 
 pub(crate) async fn userdata_from_username(username: &str) -> Result<NewAccount, ResponseError> {
@@ -250,7 +244,7 @@ pub(crate) async fn userdata_from_username(username: &str) -> Result<NewAccount,
 #[inline(always)]
 fn convert_attribute_vec_to_vec(a: &[AttributeValue]) -> Vec<String> {
     a.iter().map(|x| x.s.clone().unwrap_or_default()).collect()
-} 
+}
 
 pub(crate) async fn update_admin_table() {}
 
@@ -272,7 +266,7 @@ pub(crate) async fn load_admin_table() -> Result<UpdateAdminDetails, ResponseErr
     unimplemented!();
     /*
     Ok(UpdateAdminDetails {
-        creation_code: 
+        creation_code:
     })
     */
 }

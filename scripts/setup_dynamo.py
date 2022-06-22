@@ -1,6 +1,6 @@
 #!/bin/python
 import boto3
-from environs import Env 
+from environs import Env
 import sys
 
 # parses markdown files and generates tables from them
@@ -17,15 +17,13 @@ def parseType(t):
     if t == "string":
         return "S"
     if t == "bool":
-        return "BOOL"
+        return None
     if t == "u16" or t == "u32" or t == "u64":
         return "N"
     if "vec" in t:
-        return "L"
-    # maybe it is better to quit if this is the case
-    return "S"
-
-    
+        return None
+    print("found invalid attribute: ", t)
+    exit()
 
 pkey = ""
 tableList = []
@@ -68,8 +66,10 @@ for line in file.readlines():
         if start:
             lineData = retain(line.split(" "), "")
             attributeName = lineData[1]
-            attributes.append(attributeName)
             attType = parseType(lineData[3])
+            if attType == None:
+                continue
+            attributes.append(attributeName)
             types.append(attType)
             print("\tattribute: ", attributeName, " \ttype: ", attType)
 
@@ -87,23 +87,27 @@ for table in tableList:
             start = False
             continue
         attrDef.append(
-            { 
-                'AttributeName': k, 
-                'AttributeType': v 
+            {
+                'AttributeName': k,
+                'AttributeType': v
             }
         )
+    print(attrDef)
     if len(attrDef) < 1:
         continue
     print("\ncreating", table[2])
     # continue
-    table = dynamodb.create_table(
-        TableName=table[2],
-        KeySchema=[
-            {
-                'AttributeName': table[0][0],
-                'KeyType': 'HASH'  #Partition key
-            },
-        ],
-        AttributeDefinitions= attrDef
-    )
-    print("Table status:", table.table_status)
+    table = {
+            'TableName': table[2],
+            'KeySchema': [
+                {
+                    'AttributeName': table[0][0],
+                    'KeyType': 'HASH'  #Partition key
+                },
+            ],
+            'AttributeDefinitions': attrDef,
+            'BillingMode': 'PROVISIONED',
+            'ProvisionedThroughput': {'ReadCapacityUnits': 2, 'WriteCapacityUnits': 2}
+    }
+    dtable = dynamodb.create_table(**table)
+    print("Table status:", dtable.table_status)
